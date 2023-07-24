@@ -7,7 +7,6 @@ from .example import Example
 from .utils import nostdout
 from pycocotools.coco import COCO as pyCOCO
 
-
 class Dataset(object):
     def __init__(self, examples, fields):
         self.examples = examples
@@ -39,8 +38,15 @@ class Dataset(object):
         example = self.examples[i]
         data = []
         for field_name, field in self.fields.items():
-            data.append(field.preprocess(getattr(example, field_name)))
-
+            if field_name != 'caps':
+                if field_name == 'image' or field_name == 'text' or field_name == 'pixel':
+                    data.append(field.preprocess(getattr(example, field_name)))
+                else:
+                    field_name = 'image'
+                    data.append(field.preprocess(getattr(example, field_name)))
+            else:
+                field_name = 'image'
+                data.append(field.captions(getattr(example, field_name)))
         if len(data) == 1:
             data = data[0]
         return data
@@ -95,6 +101,11 @@ class DictionaryDataset(Dataset):
         for field in key_fields:
             assert (field in fields)
 
+        new_fields = {'image': fields['image'], 'text': fields['text'], 'pixel': fields['pixel']}
+        clip_fields = {'clip_img': fields['clip']}
+        p1_fields = {'caps': fields['p1']}
+        fields = new_fields
+
         dictionary = collections.defaultdict(list)
         key_fields = {k: fields[k] for k in key_fields}
         value_fields = {k: fields[k] for k in fields.keys() if k not in key_fields}
@@ -113,19 +124,36 @@ class DictionaryDataset(Dataset):
             dictionary[key_dict[key_example]].append(i)
 
         self.key_dataset = Dataset(key_examples, key_fields)
+        self.clip = Dataset(key_examples, clip_fields)
+        self.p1 = Dataset(key_examples, p1_fields)
         self.value_dataset = ValueDataset(value_examples, value_fields, dictionary)
         super(DictionaryDataset, self).__init__(examples, fields)
 
     def collate_fn(self):
         def collate(batch):
-            key_batch, value_batch = list(zip(*batch))
+            key_batch, value_batch, clip_batch, p1_batch = list(zip(*batch))
             key_tensors = self.key_dataset.collate_fn()(key_batch)
             value_tensors = self.value_dataset.collate_fn()(value_batch)
-            return key_tensors, value_tensors
+            clip_tensors = []
+            for data in clip_batch:
+                clip_tensor = data
+                if isinstance(clip_tensor, collections.Sequence) and any(
+                        isinstance(t, torch.Tensor) for t in clip_tensor):
+                    clip_tensors.extend(clip_tensor)
+                else:
+                    clip_tensors.append(clip_tensor)
+            p1_tensors = []
+            for data in p1_batch:
+                p1_tensor = data
+                if isinstance(p1_tensor, collections.Sequence) and any(isinstance(t, torch.Tensor) for t in p1_tensor):
+                    p1_tensors.extend(p1_tensor)
+                else:
+                    p1_tensors.append(p1_tensor)
+            return key_tensors, value_tensors, clip_tensors, p1_tensors
         return collate
 
     def __getitem__(self, i):
-        return self.key_dataset[i], self.value_dataset[i]
+        return self.key_dataset[i], self.value_dataset[i], self.clip[i], self.p1[i]
 
     def __len__(self):
         return len(self.key_dataset)
@@ -181,8 +209,8 @@ class PairedDataset(Dataset):
 
 
 class COCO(PairedDataset):
-    def __init__(self, image_field, text_field, pixel_field, img_root, ann_root, id_root=None, use_restval=True,
-                 cut_validation=False):
+    def __init__(self, image_field, text_field, pixel_field, p1, img_root, ann_root, id_root=None, use_restval=True,
+                 cut_validation=False, idx='Fully'):
         roots = {}
         roots['train'] = {
             'img': os.path.join(img_root, 'train2014'),
@@ -220,8 +248,31 @@ class COCO(PairedDataset):
 
         with nostdout():
             self.train_examples, self.val_examples, self.test_examples = self.get_samples(roots, ids)
+        L1P1 = open('data/L1P1.txt', 'r')
+        L2P1 = open('data/L2P1.txt', 'r')
+        L3P1 = open('data/L3P1.txt', 'r')
+        if idx == 'L1P1':
+            print('L1P1')
+            sample = L1P1
+            new_train_examples = []
+            for i in sample:
+                new_train_examples.append(self.train_examples[int(i)])
+        elif idx == 'L2P1':
+            sample = L2P1
+            new_train_examples = []
+            for i in sample:
+                new_train_examples.append(self.train_examples[int(i)])
+        elif idx == 'L3P1':
+            print('L3P1')
+            sample = L3P1
+            new_train_examples = []
+            for i in sample:
+                new_train_examples.append(self.train_examples[int(i)])
+        else:
+            new_train_examples = self.train_examples
+        self.train_examples = new_train_examples
         examples = self.train_examples + self.val_examples + self.test_examples
-        super(COCO, self).__init__(examples, {'image': image_field, 'text': text_field, 'pixel': pixel_field})
+        super(COCO, self).__init__(examples, {'image': image_field, 'text': text_field, 'pixel': pixel_field, 'p1': p1}, )
 
     @property
     def splits(self):
@@ -268,7 +319,8 @@ class COCO(PairedDataset):
                 img_id = coco.anns[ann_id]['image_id']
                 filename = coco.loadImgs(img_id)[0]['file_name']
 
-                example = Example.fromdict({'image': os.path.join(img_root, filename), 'text': caption, 'pixel': os.path.join(img_root, filename)})
+                example = Example.fromdict({'image': os.path.join(img_root, filename), 'text': caption,
+                                            'pixel': os.path.join(img_root, filename)})
 
                 if split == 'train':
                     train_samples.append(example)
@@ -278,4 +330,3 @@ class COCO(PairedDataset):
                     test_samples.append(example)
 
         return train_samples, val_samples, test_samples
-
