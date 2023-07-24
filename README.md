@@ -49,7 +49,7 @@ Use CLIP, BART-Xsum, and Sentence-Bert to generate four pseudo sentences (RaPSG 
 python clip2sentence.py
 ```
 #### Step 3:
-Download the prediction sentences from frozen captioner [here](https://github.com/). If you want to get the prediction sentences by yourself, you can try to use four generated pseudo sentences in Step 2 to train the DIFNet and get the prediction sentences.
+Download the prediction sentences from frozen captioner [here](https://github.com/). You also need to download clip_feature [file](https://github.com/) If you want to get the prediction sentences by yourself, you can try to use four generated pseudo sentences in Step 2 to train the DIFNet and get the prediction sentences.
 
 #### Step 4:
 Use LLaMA-7B and the prediction sentences to generate the fifth pseudo sentence.
@@ -59,10 +59,20 @@ python lora_generate.py
 After these four steps, we get the five pseudo sentences.
 
 ## Training
+```
+python train.py --mode difnet --setting no_anno
+```
+## Output
+```bash
+{BLEU : [0.7057666698578559, 0.4812259788649079, 0.3102759402066803, 0.19348772041165319]  METEOR : 0.21406017447362663  ROUGE : 0.4606356089131206  CIDEr : 0.7812562433169554  SPICE : 0.149468653248824}
+```
 
+# Semi-supervised setting
+```
+python train.py --mode difnet --setting semi
+```
+## Output
+```bash
+{BLEU : [0.7353274018650132, 0.5564645970737054, 0.3967128515231957, 0.27683646813002477]  METEOR : 0.2311046506771781  ROUGE : 0.5182142867406152  CIDEr : 0.9344287284363694  SPICE : 0.1665034571276323}
+```
 
-
-
-
-# RaPSG
-This repo contains the code for paper "Exploring Annotation-free Image Captioning with Retrieval-augmented Pseudo Sentence Generation"
