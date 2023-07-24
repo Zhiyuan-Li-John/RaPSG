@@ -451,3 +451,119 @@ class ImageDetectionsField1(RawField):
 
         return image_id, precomp_data.astype(np.float32)
 
+
+class PseudoCaption(RawField):
+    vocab_cls = Vocab
+    def __init__(self, preprocessing=None, postprocessing=None, detections_path=None):
+        self.detections_path = detections_path
+        self.dtype = torch.long
+        self.lower = True
+        self.tokenize = get_tokenizer('spacy')  # tokenize='spacy'
+        self.punctuations = ["''", "'", "``", "`", "-LRB-", "-RRB-", "-LCB-", "-RCB-", \
+                        ".", "?", "!", ",", ":", "-", "--", "...", ";"]
+        self.init_token = '<bos>'
+        self.eos_token = '<eos>'
+        self.pad_token = "<pad>"
+        self.unk_token = "<unk>"
+        self.truncate_first = False
+        self.batch_first = True
+        self.vocab = pickle.load(open('vocab_dlct.pkl', 'rb'))
+        super(PseudoCaption, self).__init__(preprocessing, postprocessing)
+
+    def captions(self, x):
+        image_id = int(x.split('_')[-1].split('.')[0])
+        f = h5py.File(self.detections_path, 'r')
+        text = f['%d' % image_id][()]
+        if type(text) == numpy.ndarray:
+            txt = []
+            for i in text:
+                txt.append(bytes.decode(i))
+        else:
+            txt = bytes.decode(text)
+        return txt
+
+    def preprocess(self, x):
+        image_id = int(x.split('_')[-1].split('.')[0])
+        f = h5py.File(self.detections_path, 'r')
+        text = f['%d' % image_id][()]
+        txt = bytes.decode(text)
+        x = txt
+        if six.PY2 and isinstance(x, six.string_types) and not isinstance(x, six.text_type):
+            x = six.text_type(x, encoding='utf-8')
+        x = six.text_type.lower(x)
+        x = self.tokenize(x.rstrip('\n'))
+        x = [w for w in x if w not in self.punctuations]
+        return x
+
+    def process(self, batch, device=None):
+        padded = self.pad(batch)
+        tensor = self.numericalize(padded, device=device)
+        return tensor
+
+
+    def pad(self, minibatch):
+        """Pad a batch of examples using this field.
+        Pads to self.fix_length if provided, otherwise pads to the length of
+        the longest example in the batch. Prepends self.init_token and appends
+        self.eos_token if those attributes are not None. Returns a tuple of the
+        padded list and a list containing lengths of each example if
+        `self.include_lengths` is `True`, else just
+        returns the padded list.
+        """
+        minibatch = list(minibatch)
+        max_len = max(len(x) for x in minibatch)
+        padded, lengths = [], []
+        for x in minibatch:
+            padded.append(
+                ([] if self.init_token is None else [self.init_token]) +
+                list(x[-max_len:] if self.truncate_first else x[:max_len]) +
+                ([] if self.eos_token is None else [self.eos_token]) +
+                [self.pad_token] * max(0, max_len - len(x)))
+            lengths.append(len(padded[-1]) - max(0, max_len - len(x)))
+        return padded
+
+    def numericalize(self, arr, device=None):
+        """Turn a batch of examples that use this field into a list of Variables.
+        If the field has include_lengths=True, a tensor of lengths will be
+        included in the return value.
+        Arguments:
+            arr (List[List[str]], or tuple of (List[List[str]], List[int])):
+                List of tokenized and padded examples, or tuple of List of
+                tokenized and padded examples and List of lengths of each
+                example if self.include_lengths is True.
+            device (str or torch.device): A string or instance of `torch.device`
+                specifying which device the Variables are going to be created on.
+                If left as default, the tensors will be created on cpu. Default: None.
+        """
+        if isinstance(arr, tuple):
+            arr, lengths = arr
+            lengths = torch.tensor(lengths, dtype=self.dtype, device=device)
+
+        arr = [[self.vocab.stoi[x] for x in ex] for ex in arr]
+
+        if self.postprocessing is not None:
+            arr = self.postprocessing(arr, self.vocab)
+
+        var = torch.tensor(arr, dtype=self.dtype, device=device)
+
+
+        # var = torch.tensor(arr, dtype=self.dtype, device=device)
+        if not self.batch_first:
+            var.t_()
+        var = var.contiguous()
+
+        return var
+
+class Singlefeature(RawField):
+    def __init__(self, preprocessing=None, postprocessing=None, detections_path=None):
+        self.detections_path = detections_path
+        super(Singlefeature, self).__init__(preprocessing, postprocessing)
+
+    def preprocess(self, x):
+        image_id = int(x.split('_')[-1].split('.')[0])
+        f = h5py.File(self.detections_path, 'r')
+        feature = f['%d' % image_id][()]
+        return feature
+
+
+
