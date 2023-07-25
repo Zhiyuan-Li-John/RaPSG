@@ -1,5 +1,5 @@
 from .field import RawField, Merge, ImageDetectionsField, ImageDetectionsField152, TextField, PixelField, \
-                    ImageDetectionsField1
+                    ImageDetectionsField1, PseudoCaption, Singlefeature
 from .dataset import COCO
 from torch.utils.data import DataLoader as TorchDataLoader
 

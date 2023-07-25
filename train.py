@@ -1,5 +1,5 @@
 import random
-from data import ImageDetectionsField, TextField, RawField, PixelField
+from data import ImageDetectionsField, TextField, RawField, PixelField, PseudoCaption, Singlefeature
 from data import COCO, DataLoader
 import evaluation
 from evaluation import PTBTokenizer, Cider
@@ -35,7 +35,7 @@ def evaluate_loss(model, dataloader, loss_fn, text_field):
     running_loss = .0
     with tqdm(desc='Epoch %d - validation' % e, unit='it', total=len(dataloader)) as pbar:
         with torch.no_grad():
-            for it, (detections, captions, pixels) in enumerate(dataloader):
+            for it, (detections, img_ids, captions, pixels, p1) in enumerate(dataloader):
                 detections, captions, pixels = detections.to(device), captions.to(device), pixels.to(device)
                 out = model(detections, captions, pixels)
                 captions = captions[:, 1:].contiguous()
@@ -59,11 +59,11 @@ def evaluate_metrics(model, dataloader, text_field):
     gen = {}
     gts = {}
     with tqdm(desc='Epoch %d - evaluation' % e, unit='it', total=len(dataloader)) as pbar:
-        for it, ((images, pixels), caps_gt) in enumerate(iter(dataloader)):
+        for it, ((images, img_ids, pixels), caps_gt, clip, p1) in enumerate(iter(dataloader)):
             images = images.to(device)
             pixels = pixels.to(device)
             with torch.no_grad():
-                out, _ = model.beam_search(images, pixels, 20, text_field.vocab.stoi['<eos>'], 5, out_size=1)
+                out, _ , _= model.beam_search(clip_img, images, pixels, 20, text_field.vocab.stoi['<eos>'], 5, out_size=1)
             caps_gen = text_field.decode(out, join_words=False)
             for i, (gts_i, gen_i) in enumerate(zip(caps_gt, caps_gen)):
                 gen_i = ' '.join([k for k, g in itertools.groupby(gen_i)])
@@ -85,13 +85,16 @@ def train_xe(model, dataloader, optim, text_field):
     scheduler.step()
     running_loss = .0
     with tqdm(desc='Epoch %d - train' % e, unit='it', total=len(dataloader)) as pbar:
-        for it, (detections, captions, pixels) in enumerate(dataloader):
+        for it, (detections, img_ids, captions, pixels, p1) in enumerate(dataloader):
             detections, captions, pixels = detections.to(device), captions.to(device), pixels.to(device)
-            out = model(detections, captions, pixels)
+            p1 = p1.to(device)
+
+            out = model(detections, p1, pixels)
             optim.zero_grad()
-            captions_gt = captions[:, 1:].contiguous()
+            p1_gt = captions[:, 1:].contiguous()
             out = out[:, :-1].contiguous()
-            loss = loss_fn(out.view(-1, len(text_field.vocab)), captions_gt.view(-1))
+            loss = loss_fn(out.view(-1, len(text_field.vocab)), p1_gt.view(-1))
+            loss = loss.mean()
             loss.backward()
 
             optim.step()
@@ -119,10 +122,11 @@ def train_scst(model, dataloader, optim, cider, text_field):
     beam_size = 5
 
     with tqdm(desc='Epoch %d - train' % e, unit='it', total=len(dataloader)) as pbar:
-        for it, ((detections, pixels), caps_gt) in enumerate(dataloader):
+        for it, ((detections, img_ids, pixels), caps_gt, clip, p1) in enumerate(dataloader):
             detections = detections.to(device)
             pixels = pixels.to(device)
-            outs, log_probs = model.beam_search(detections, pixels, seq_len, text_field.vocab.stoi['<eos>'],
+            clip = torch.FloatTensor(np.array(clip)).to(device)
+            outs, log_probs, contrastive_loss = model.beam_search(clip_img, detections, pixels, seq_len, text_field.vocab.stoi['<eos>'],
                                                 beam_size, out_size=beam_size)
             optim.zero_grad()
 
@@ -136,6 +140,8 @@ def train_scst(model, dataloader, optim, cider, text_field):
             loss = -torch.mean(log_probs, -1) * (reward - reward_baseline)
 
             loss = loss.mean()
+            Lambada = 0.0001
+            loss = loss + Lambada * contrastive_loss
             loss.backward()
             optim.step()
 
@@ -158,7 +164,6 @@ if __name__ == '__main__':
     device = torch.device('cuda')
     parser = argparse.ArgumentParser(description='DIFNet')
     parser.add_argument('--exp_name', type=str, default='DIFNet')
-
     parser.add_argument('--batch_size', type=int, default=50)
     parser.add_argument('--workers', type=int, default=4)
     parser.add_argument('--m', type=int, default=40)
@@ -181,6 +186,15 @@ if __name__ == '__main__':
         test = True
     writer = SummaryWriter(log_dir=os.path.join(args.logs_folder, args.exp_name))
 
+    # load pseudo caption
+    pseudo_cap1_path = args.features_path + '/coco_pseudo.hdf5'
+    pseudo_cap1 = PseudoCaption(detections_path=pseudo_cap1_path)
+    p1 = pseudo_cap1
+
+    # load clip feature
+    clip_img_path = args.features_path + '/clip_feat.hdf5'
+    clip_img = Singlefeature(detections_path=clip_img_path)
+
     # Pipeline for image regions
     image_field = ImageDetectionsField(detections_path=args.features_path, max_detections=49, load_in_tmp=False)
     # Pipeline for pixel
@@ -190,7 +204,9 @@ if __name__ == '__main__':
 
     # Create the dataset
     dataset = COCO(image_field, text_field, pixel_field, 'coco/images/', args.annotation_folder, args.annotation_folder)
+    # dataset_P = COCO(image_field, text_field, pixel_field, p1,  'coco/images/', args.annotation_folder, args.annotation_folder, idx='L1P1') # for semi
     train_dataset, val_dataset, test_dataset = dataset.splits
+    # train_dataset_P, val_dataset_P, test_dataset_P = dataset_P.splits # for semi
 
     if not os.path.isfile('vocab.pkl'):
         print("Building vocabulary")
@@ -218,11 +234,12 @@ if __name__ == '__main__':
         decoder = TransformerDecoder_LRP(len(text_field.vocab), 54, 3, text_field.vocab.stoi['<pad>'])
         model = Difnet_LRP(text_field.vocab.stoi['<bos>'], encoder, decoder).to(device)
 
-    dict_dataset_train = train_dataset.image_dictionary({'image': image_field, 'text': RawField(), 'pixel': pixel_field})
+    dict_dataset_train = train_dataset.image_dictionary({'image': image_field, 'text': RawField(), 'pixel': pixel_field, 'clip': clip_img, 'p1': p1})
+    # dict_dataset_train_P = train_dataset_P.image_dictionary({'image': image_field, 'text': RawField(), 'pixel': pixel_field, 'clip': clip_img, 'p1': p1}) # for semi
     ref_caps_train = list(train_dataset.text)
     cider_train = Cider(PTBTokenizer.tokenize(ref_caps_train))
-    dict_dataset_val = val_dataset.image_dictionary({'image': image_field, 'text': RawField(), 'pixel': pixel_field})
-    dict_dataset_test = test_dataset.image_dictionary({'image': image_field, 'text': RawField(), 'pixel': pixel_field})
+    dict_dataset_val = val_dataset.image_dictionary({'image': image_field, 'text': RawField(), 'pixel': pixel_field, 'clip': clip_img, 'p1': p1})
+    dict_dataset_test = test_dataset.image_dictionary({'image': image_field, 'text': RawField(), 'pixel': pixel_field, 'clip': clip_img, 'p1': p1})
 
     '''
     def lambda_lr(s):
@@ -289,16 +306,18 @@ if __name__ == '__main__':
             print('patience:', data['patience'])
             print('num_workers:', args.workers)
 
+    dataloader_train = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.workers,
+                                      drop_last=True)
+    dataloader_val = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.workers)
+    dict_dataloader_train = DataLoader(dict_dataset_train, batch_size=args.batch_size // 5, shuffle=False,
+                                        num_workers=args.workers)
+    # dict_dataloader_train_P = DataLoader(dict_dataset_train_P, batch_size=args.batch_size // 5, shuffle=False,
+    #                                    num_workers=args.workers) #for semi
+    dict_dataloader_val = DataLoader(dict_dataset_val, batch_size=args.batch_size // 5)
+    dict_dataloader_test = DataLoader(dict_dataset_test, batch_size=args.batch_size // 5)
+
     print("Training starts")
     for e in range(start_epoch, start_epoch + 100):
-        dataloader_train = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.workers,
-                                      drop_last=True)
-        dataloader_val = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.workers)
-        dict_dataloader_train = DataLoader(dict_dataset_train, batch_size=args.batch_size // 5, shuffle=True,
-                                           num_workers=args.workers)
-        dict_dataloader_val = DataLoader(dict_dataset_val, batch_size=args.batch_size // 5)
-        dict_dataloader_test = DataLoader(dict_dataset_test, batch_size=args.batch_size // 5)
-
         if not use_rl:
             train_loss = train_xe(model, dataloader_train, optim, text_field)
             writer.add_scalar('data/train_loss', train_loss, e)

@@ -474,7 +474,7 @@ class PseudoCaption(RawField):
         image_id = int(x.split('_')[-1].split('.')[0])
         f = h5py.File(self.detections_path, 'r')
         text = f['%d' % image_id][()]
-        if type(text) == numpy.ndarray:
+        if type(text) == np.ndarray:
             txt = []
             for i in text:
                 txt.append(bytes.decode(i))
