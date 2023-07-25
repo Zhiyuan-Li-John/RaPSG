@@ -25,3 +25,13 @@ dataset
     |       |
 
 '''
+
+
+```Text
+vis_ctx.hdf5
+    |
+    +-- img_id (str): encoded features (float numpy array of (768, ) shape)
+    |
+    ...
+
+```
