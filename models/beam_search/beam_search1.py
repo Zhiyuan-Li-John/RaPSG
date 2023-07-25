@@ -132,7 +132,7 @@ class BeamSearch1(object):
             candidate_logprob = self.seq_mask * candidate_logprob + old_seq_logprob * (1 - self.seq_mask)
 
         selected_idx, selected_logprob = self.select(t, candidate_logprob, **kwargs)
-        selected_beam = selected_idx // candidate_logprob.shape[-1]  # revise
+        selected_beam = (selected_idx / candidate_logprob.shape[-1]).long() # revise
         selected_words = selected_idx - selected_beam * candidate_logprob.shape[-1]
 
         self.model.apply_to_states(self._expand_state(selected_beam, cur_beam_size))

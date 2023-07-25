@@ -7,6 +7,7 @@ from .example import Example
 from .utils import nostdout
 from pycocotools.coco import COCO as pyCOCO
 
+
 class Dataset(object):
     def __init__(self, examples, fields):
         self.examples = examples
@@ -330,3 +331,4 @@ class COCO(PairedDataset):
                     test_samples.append(example)
 
         return train_samples, val_samples, test_samples
+
