@@ -1,6 +1,6 @@
 import torch
 import utils
-
+from torch.nn import functional as F
 
 class BeamSearch1(object):
     '''add segmentation feature'''
@@ -56,7 +56,7 @@ class BeamSearch1(object):
             visual = tuple(new_visual)
         return visual
 
-    def apply(self, visual: utils.TensorOrSequence, pixels: utils.TensorOrSequence, out_size=1, return_probs=False, **kwargs):
+    def apply(self, clip_img, visual: utils.TensorOrSequence, pixels: utils.TensorOrSequence, out_size=1, return_probs=False, **kwargs):
         self.b_s = utils.get_batch_size(visual)
         self.device = utils.get_device(visual)
         self.seq_mask = torch.ones((self.b_s, self.beam_size, 1), device=self.device)
@@ -67,9 +67,11 @@ class BeamSearch1(object):
             self.all_log_probs = []
 
         outputs = []
+        contrastive_loss_all = 0
         with self.model.statefulness(self.b_s):
             for t in range(self.max_len):
-                visual, outputs = self.iter(t, visual, pixels, outputs, return_probs, **kwargs)
+                visual, outputs, contrastive_loss, clip_img = self.iter(clip_img, t, visual, pixels, outputs, return_probs, **kwargs)
+                contrastive_loss_all += contrastive_loss
 
         # Sort result
         seq_logprob, sort_idxs = torch.sort(self.seq_logprob, 1, descending=True)
@@ -92,17 +94,31 @@ class BeamSearch1(object):
         if return_probs:
             return outputs, log_probs, all_log_probs
         else:
-            return outputs, log_probs
+            return outputs, log_probs, contrastive_loss_all
 
     def select(self, t, candidate_logprob, **kwargs):
         selected_logprob, selected_idx = torch.sort(candidate_logprob.view(self.b_s, -1), -1, descending=True)
         selected_logprob, selected_idx = selected_logprob[:, :self.beam_size], selected_idx[:, :self.beam_size]
         return selected_idx, selected_logprob
 
-    def iter(self, t: int, visual: utils.TensorOrSequence, pixels: utils.TensorOrSequence, outputs, return_probs, **kwargs):
+    def iter(self, clip_img, t: int, visual: utils.TensorOrSequence, pixels: utils.TensorOrSequence, outputs, return_probs, **kwargs):
         cur_beam_size = 1 if t == 0 else self.beam_size
 
         word_logprob = self.model.step(t, self.selected_words, visual, pixels, None, mode='feedback', **kwargs)
+        [a, b, c] = word_logprob.shape
+        semi_word = word_logprob.view(a, c)
+        semi_word = F.normalize(semi_word)
+        semi_visual = F.normalize(clip_img)  # semi_visual
+        semi_word = torch.mean(semi_word, dim=1)
+        semi_visual = torch.mean(semi_visual, dim=1)
+        semi_word = semi_word.view(a, 1)
+        semi_visual = semi_visual.view(a, 1)
+        logits1 = torch.mm(semi_word, semi_visual.t())
+        logits2 = torch.mm(semi_visual, semi_word.t())
+        tau = 0.2  # temperature
+        [N, N] = logits1.shape
+        labels = torch.zeros(N, dtype=torch.int64).to(torch.device('cuda'))
+        contrastive_loss = F.cross_entropy(logits1 / tau, labels) + F.cross_entropy(logits2 / tau, labels)
         word_logprob = word_logprob.view(self.b_s, cur_beam_size, -1)
         candidate_logprob = self.seq_logprob + word_logprob
 
@@ -121,6 +137,7 @@ class BeamSearch1(object):
 
         self.model.apply_to_states(self._expand_state(selected_beam, cur_beam_size))
         visual = self._expand_visual(visual, cur_beam_size, selected_beam)
+        clip_img = self._expand_visual(clip_img, cur_beam_size, selected_beam)
 
         self.seq_logprob = selected_logprob.unsqueeze(-1)
         self.seq_mask = torch.gather(self.seq_mask, 1, selected_beam.unsqueeze(-1))
@@ -142,4 +159,5 @@ class BeamSearch1(object):
         self.log_probs.append(this_word_logprob)
         self.selected_words = selected_words.view(-1, 1)
 
-        return visual, outputs
+        return visual, outputs, contrastive_loss, clip_img
+
