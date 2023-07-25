@@ -15,6 +15,7 @@ Clone the repository and create the `difnet` conda environment using the `enviro
 conda env create -f environment.yml
 conda activate difnet
 ```
+Note: If you can't build the environment, you can also build an alternative one based on [Xmodal-CTX environment](https://github.com/GT-RIPL/Xmodal-Ctx/tree/main)
 
 Then download spacy data by executing the following command:
 ```
