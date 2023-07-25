@@ -1,6 +1,10 @@
 # Please put all data files here
 
 ## The file structure need be structed as follows:
+<<<<<<< HEAD
+=======
+
+>>>>>>> 0cefe9fb70243f87dfa9b9661b4e0321699b61bb
 ```Text
 dataset
     |
@@ -23,4 +27,8 @@ dataset
     +-- pseudo_sentence.hdf5
     |       |
 
+<<<<<<< HEAD
 ```
+=======
+```
+>>>>>>> 0cefe9fb70243f87dfa9b9661b4e0321699b61bb
