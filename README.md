@@ -38,8 +38,8 @@ Segmentation features are computed with the code provided by [UPSNet](https://gi
 For more details, please refer to [DIFNet](https://github.com/mrwu-mac/DIFNet)
 
 ### Pseudo sentences generation
-We recommend you directly download the prepared pseudo sentence for the code running [here](https://github.com/).
-You also need to download clip_feature [file](https://github.com/) for code running
+We recommend you directly download the prepared pseudo sentence for the code running [here](https://drive.google.com/file/d/1ICMj6X0JRgCcUSZ39O1WUPJhgzr9ZQyb/view?usp=drive_link).
+You also need to download clip_feature [file](https://drive.google.com/file/d/1ICMj6X0JRgCcUSZ39O1WUPJhgzr9ZQyb/view?usp=drive_link) for code running
 
 If you want to re-build the pseudo sentence by yourself, please follow the below steps:
 #### Step 1:
