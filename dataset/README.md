@@ -2,7 +2,7 @@
 
 ## The file structure need be structed as follows:
 
-'''Text
+```Text
 dataset
     |
     +-- annotations (folder)
@@ -23,15 +23,5 @@ dataset
     |       |
     +-- pseudo_sentence.hdf5
     |       |
-
-'''
-
-
-```Text
-vis_ctx.hdf5
-    |
-    +-- img_id (str): encoded features (float numpy array of (768, ) shape)
-    |
-    ...
 
 ```
