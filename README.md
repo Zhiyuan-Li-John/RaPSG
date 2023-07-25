@@ -39,22 +39,23 @@ For more details, please refer to [DIFNet](https://github.com/mrwu-mac/DIFNet)
 
 ### Pseudo sentences generation
 We recommend you directly download the prepared pseudo sentence for the code running [here](https://github.com/).
+You also need to download clip_feature [file](https://github.com/)
 
 If you want to re-build the pseudo sentence by yourself, please follow the below steps:
 #### Step 1:
-Download the prepared region descriptions [here](https://github.com/). We follow the idea of Xmodal-ctx to generate the region descriptions. If you want to generate region descriptions by yourself, please follow up [CTX](https://github.com/GT-RIPL/Xmodal-Ctx/tree/main/ctx).
+Download the prepared region descriptions here. We follow the idea of Xmodal-ctx to generate the region descriptions. If you want to generate region descriptions by yourself, please follow up [CTX](https://github.com/GT-RIPL/Xmodal-Ctx/tree/main/ctx).
 #### Step 2:
 Use CLIP, BART-Xsum, and Sentence-Bert to generate four pseudo sentences (RaPSG module stage 1)  
 ```
-python clip2sentence.py
+python generate/clip2sentence.py
 ```
 #### Step 3:
-Download the prediction sentences from frozen captioner [here](https://github.com/). You also need to download clip_feature [file](https://github.com/) If you want to get the prediction sentences by yourself, you can try to use four generated pseudo sentences in Step 2 to train the DIFNet and get the prediction sentences.
+Download the prediction sentences from the frozen captioner here. If you want to get the prediction sentences by yourself, you can try to use four generated pseudo sentences in Step 2 to train the DIFNet and get the prediction sentences.
 
 #### Step 4:
 Use LLaMA-7B and the prediction sentences to generate the fifth pseudo sentence.
 ```
-python lora_generate.py
+python generate/lora_generate.py
 ```
 After these four steps, we get the five pseudo sentences.
 
