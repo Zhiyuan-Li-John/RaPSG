@@ -1,4 +1,4 @@
-# It will come soon!
+# Please follow the instruction to generate the sentence
 
 ## Please follow the below step to generate pseudo sentence
 
